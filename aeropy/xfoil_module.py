@@ -1017,7 +1017,7 @@ def M_crit(airfoil, pho, speed_sound, lift, c):
 
 
 if __name__ == '__main__':
-    print(find_coefficients('naca0012', 1., Reynolds=1000000))
+    print(find_coefficients('naca0012', 1., Reynolds=1000000, NACA=True))
 
     import matplotlib.pyplot as plt
     upper = {'x': [0, .1, 10, 20, 30], 'y': [0, 2, 4, 2, 1]}
