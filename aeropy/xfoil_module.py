@@ -101,7 +101,7 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
     #                               Functions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    def issueCmd(cmd, echo=True):
+    def issueCmd(cmd, echo=False):
         """Submit a command through PIPE to the command lineself.
 
         (Therefore leading the commands to xfoil.)
@@ -207,7 +207,8 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
                   stdin=sp.PIPE,
                   stdout=sout,
                   stderr=None,
-                  startupinfo=startupinfo)
+                  startupinfo=startupinfo,
+                  encoding='utf8')
 
     # Loading geometry
     if NORM is True:
@@ -764,7 +765,11 @@ def output_reader(filename, separator='\t', output=None,  # noqa C901
                                                     ).replace(
                                                         '------', ''
                                                         )
-                    line_components = line.split(' ')
+                                                        
+                    
+                    line_components = " -".join(line.rsplit("-",1))
+                    line_components = line_components.split(' ')
+                    #line_components = line.split(' ')
 
                     n_del = line_components.count('')
                     for n in range(0, n_del):
@@ -780,7 +785,7 @@ def output_reader(filename, separator='\t', output=None,  # noqa C901
                             except:  #noqa E722
                                 print('Error when recording for: ')
                                 print('Line components:', line_components)
-                                print('ttpe structure:', type_structure)
+                                print('type structure:', type_structure)
                                 print('index:', j)
                                 print('header:', header)
                                 raise ValueError('Something went wrong')
@@ -813,7 +818,10 @@ def output_reader(filename, separator='\t', output=None,  # noqa C901
                                                     ).replace('-', ' -'
                                                               )
 
-                    line_components = line.split(' ')
+                    
+                    line_components = " -".join(line.rsplit("-",1))
+                    line_components = line_components.split(' ')
+                    #line_components = line.split(' ')
 
                     n_del = line_components.count('')
                     for n in range(0, n_del):
@@ -923,7 +931,10 @@ def file_name(airfoil, alfas='none', output='Cp'):
 
 
 def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
-                      NACA=True, delete=False, PANE=False):
+                      NACA=True, delete=False, PANE=False,
+                      GDES=False):
+                      GDES = False):
+
     """Calculate the coefficients of an airfoil.
 
     Includes lift, drag, moment, friction etc coefficients.
@@ -932,7 +943,9 @@ def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
     # If file already exists, there is no need to recalculate it.
     if not os.path.isfile(filename):
         call(airfoil, alpha, Reynolds=Reynolds,
-             output='Polar', iteration=iteration, NACA=NACA, PANE=PANE)
+             output='Polar', iteration=iteration, NACA=NACA,
+             PANE=PANE, GDES=GDES)
+
     coefficients = {}
     # Data from file
     Data = output_reader(filename, output='Polar', delete=False)
@@ -948,9 +961,10 @@ def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
 
 def find_pressure_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
                                NACA=True, use_previous=False, chord=1.,
-                               PANE=False):
+                               PANE=False, delete=False):
     """Calculate the pressure coefficients of an airfoil."""
     filename = file_name(airfoil, alpha, output='Cp')
+
     # If file already exists, there is no need to recalculate it.
     if not use_previous:
         call(airfoil, alpha, Reynolds=Reynolds, output='Cp',
@@ -961,12 +975,12 @@ def find_pressure_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
                  iteration=iteration, NACA=NACA, PANE=PANE)
     coefficients = {}
     # Data from file
-    Data = output_reader(filename, output='Cp')
+    Data = output_reader(filename, output='Cp', delete=delete)
 
     for key in Data:
         coefficients[key] = Data[key]
     if chord != 1.:
-        for i in range(Data[key]):
+        for i in range(len(Data[key])):
             coefficients['x'] = coefficients['x']*chord
             coefficients['y'] = coefficients['y']*chord
     return coefficients

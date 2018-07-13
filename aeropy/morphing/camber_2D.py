@@ -13,8 +13,10 @@ import math
 import numpy as np
 from numpy.linalg import inv
 
-from aeropy.airfoil_module import CST
-from aeropy.CST.module_2D import *
+from aeropy.geometry.airfoil import CST
+
+from aeropy.CST_2D.module import *
+
 
 # Just as quick trick, to make upper morph I just mirror the image in regards to x
 inverted = False
