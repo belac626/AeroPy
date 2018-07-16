@@ -1000,7 +1000,13 @@ def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10, echo=False,
     Data = output_reader(filename, output='Polar', delete=False)
     for key in Data:
         try:
-            coefficients[key] = Data[key][0]
+            if type(alpha) == list:
+                coefficients[key] = Data[key]
+                coefficients['LtoD'] = [Data['CL'][i]/Data['CD'][i]
+                                        for i in range(len(Data['alpha']))]
+            elif type(alpha) == float:
+                coefficients[key] = Data[key][0]
+                coefficients['LtoD'] = Data['CL'][0]/Data['CD'][0]
         except:  #noqa E722
             coefficients[key] = None
     if delete:
