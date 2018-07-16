@@ -70,8 +70,8 @@ class UnexpectedEndOfStream(Exception):
 
 
 def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
-         plots=False, NACA=True, GDES=False, iteration=10, flap=None,
-         PANE=False, NORM=True):
+         plots=False, echo=False, NACA=True, GDES=False, iteration=10,
+         flap=None, PANE=False, NORM=True):
     """Call xfoil through Python.
 
     The input variables are:
@@ -151,7 +151,7 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
     #                               Functions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    def issueCmd(cmd: str, echo=True):
+    def issueCmd(cmd: str, echo=echo):
         """Submit a command through PIPE to the command lineself.
 
         (Therefore leading the commands to xfoil.)
@@ -162,7 +162,7 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
         if echo:
             print(cmd)
             while True:
-                output = nbsr.readline(0.1)
+                output = nbsr.readline(0.05)
                 # 0.1 secs to let the shell output the result
                 if not output:
                     break
@@ -982,7 +982,7 @@ def file_name(airfoil, alfas='none', output='Cp'):  #noqa R701
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
+def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10, echo=False,
                       NACA=True, delete=False, PANE=False, GDES=False):
     """Calculate the coefficients of an airfoil.
 
@@ -992,7 +992,7 @@ def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
     # If file already exists, there is no need to recalculate it.
     if not os.path.isfile(filename):
         call(airfoil, alfas=alpha, Reynolds=Reynolds,
-             output='Polar', iteration=iteration,
+             output='Polar', iteration=iteration, echo=echo,
              NACA=NACA, PANE=PANE, GDES=GDES)
 
     coefficients = {}
@@ -1009,15 +1009,15 @@ def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
 
 
 def find_pressure_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
-                               NACA=True, use_previous=False, chord=1.,
-                               PANE=False, GDES=False, delete=False):
+                               echo=False, NACA=True, use_previous=False,
+                               chord=1., PANE=False, GDES=False, delete=False):
     """Calculate the pressure coefficients of an airfoil."""
     filename = file_name(airfoil, alpha, output='Cp')
 
     # If file already exists, there is no need to recalculate it.
     if not os.path.isfile(filename):
             call(airfoil, alfas=alpha, Reynolds=Reynolds,
-                 output='Cp', iteration=iteration,
+                 output='Cp', iteration=iteration, echo=echo
                  NACA=NACA, PANE=PANE, GDES=GDES)
     coefficients = {}
     # Data from file
@@ -1032,7 +1032,7 @@ def find_pressure_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
     return coefficients
 
 
-def find_alpha_L_0(airfoil, Reynolds=0, iteration=10, NACA=True):
+def find_alpha_L_0(airfoil, Reynolds=0, iteration=10, NACA=True, echo=False):
     """Find zero lift angle of attack.
 
     Calculate the angle of attack where the lift coefficient
@@ -1041,12 +1041,12 @@ def find_alpha_L_0(airfoil, Reynolds=0, iteration=10, NACA=True):
     filename = file_name(airfoil, output='Alfa_L_0')
     # If file already exists, there no need to recalculate it.
     if not os.path.isfile(filename):
-        call(airfoil, output='Alfa_L_0', NACA=NACA)
+        call(airfoil, output='Alfa_L_0', NACA=NACA, echo=echo)
     alpha = output_reader(filename, output='Alfa_L_0')['alpha'][0]
     return alpha
 
 
-def M_crit(airfoil, pho, speed_sound, lift, c):
+def M_crit(airfoil, pho, speed_sound, lift, c, echo=False):
     """Calculate the Critical Mach.
 
     This function was not validated.
@@ -1062,7 +1062,7 @@ def M_crit(airfoil, pho, speed_sound, lift, c):
     Data_crit['alpha'] = 0
     for M in M_list:
         cl = (np.sqrt(1 - M**2)/(M**2))*2*lift/pho/(speed_sound)**2/c
-        call(airfoil, alfas, output='Polar', NACA=True)
+        call(airfoil, alfas, output='Polar', NACA=True, echo=echo)
         filename = file_name(airfoil, alfas, output='Polar')
         Data = output_reader(filename, ' ', 10)
         previous_iteration = Data_crit['CL']  # noqa W0612
