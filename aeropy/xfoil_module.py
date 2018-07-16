@@ -24,7 +24,7 @@ import numpy as np
 
 def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
          plots=False, NACA=True, GDES=False, iteration=10, flap=None,
-         PANE=False, NORM=True):
+         PANE=False, NORM=True, xfoil_output=False):
     """Call xfoil through Python.
 
     The input variables are:
@@ -105,7 +105,7 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     cmdlist = str()
 
-    def appendCmd(cmdlist: str, cmd: str, echo=False):
+    def appendCmd(cmdlist: str, cmd: str, echo=True):
         """Build a single command string to sp.communicate to xfoil."""
         # """Submit a command through PIPE to the command lineself.
         #
@@ -153,8 +153,7 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
                     pass
                 # Before writing file, denormalize it
                 cmdlist = appendCmd(cmdlist, f'CPWR {filename}')
-
-            if output == 'Dump':
+            elif output == 'Dump':
                 # Creating the file with the Pressure Coefficients
                 filename = file_name(airfoil, alfas, output)
                 try:
@@ -215,7 +214,10 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
                      stderr=sp.PIPE,
                      startupinfo=startupinfo,
                      encoding='utf8')
-
+    # Turn graphics off (since we are only shelling out to xfoil)
+    cmdlist = appendCmd(cmdlist, 'PLOP')
+    cmdlist = appendCmd(cmdlist, 'G')
+    cmdlist = appendCmd(cmdlist, '')
     # Loading geometry
     if NORM is True:
         cmdlist = appendCmd(cmdlist, 'NORM')
@@ -305,16 +307,22 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
         if Multiple is True:
             for alfa in alfas:
                 submit(output, alfa, cmdlist)
-
         # For only one angle of attack
-        if Multiple is False:
+        elif Multiple is False:
             submit(output, alfas, cmdlist)
-
-        # Exiting from OPER mode
-        cmdlist = appendCmd(cmdlist, '')
-    # Exiting from xfoil
-    cmdlist = appendCmd(cmdlist, 'QUIT')
-    (output, error) = xfoil.communicate(cmdlist)
+    #
+    #     # Exiting from OPER mode
+    #     cmdlist = appendCmd(cmdlist, '')
+    # # Exiting from xfoil
+    # cmdlist = appendCmd(cmdlist, 'QUIT')
+    try:
+        (out, err) = xfoil.communicate(cmdlist, timeout=3)
+    except sp.TimeoutExpired:
+        xfoil.kill()
+        print('Xfoil killed: timeout expired')
+        (out, err) = xfoil.communicate()
+    if xfoil_output:
+        return (out, err)
 
 
 def create_input(x, y_u, y_l=None,
@@ -929,17 +937,24 @@ def file_name(airfoil, alfas='none', output='Cp'):  #noqa R701
 
 
 def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
-                      NACA=True, delete=False, PANE=False, GDES=False):
+                      NACA=True, delete=False, PANE=False, GDES=False,
+                      xfoil_output=False):
     """Calculate the coefficients of an airfoil.
 
     Includes lift, drag, moment, friction etc coefficients.
     """
     filename = file_name(airfoil, alpha, output='Polar')
+    if xfoil_output:
+        try:
+            os.remove(filename)
+        except OSError:
+            pass
     # If file already exists, there is no need to recalculate it.
     if not os.path.isfile(filename):
-        call(airfoil, alpha, Reynolds=Reynolds,
-             output='Polar', iteration=iteration,
-             NACA=NACA, PANE=PANE, GDES=GDES)
+        (out, err) = call(airfoil, alfas=alpha, Reynolds=Reynolds,
+                          output='Polar', iteration=iteration,
+                          NACA=NACA, PANE=PANE, GDES=GDES,
+                          xfoil_output=xfoil_output)
 
     coefficients = {}
     # Data from file
@@ -951,23 +966,30 @@ def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
             coefficients[key] = None
     if delete:
         os.remove(filename)
-    return coefficients
+    if xfoil_output:
+        return coefficients, (out, err)
+    else:
+        return coefficients
 
 
 def find_pressure_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
                                NACA=True, use_previous=False, chord=1.,
-                               PANE=False, delete=False):
+                               PANE=False, GDES=False, delete=False,
+                               xfoil_output=False):
     """Calculate the pressure coefficients of an airfoil."""
     filename = file_name(airfoil, alpha, output='Cp')
 
     # If file already exists, there is no need to recalculate it.
     if not use_previous:
-        call(airfoil, alpha, Reynolds=Reynolds, output='Cp',
-             iteration=iteration, NACA=NACA, PANE=PANE)
+        (out, err) = call(airfoil, alfas=alpha, Reynolds=Reynolds,
+                          output='Cp', iteration=iteration, NACA=NACA,
+                          PANE=PANE, GDES=GDES, xfoil_output=xfoil_output)
     else:
         if not os.path.isfile(filename):
-            call(airfoil, alpha, Reynolds=Reynolds, output='Cp',
-                 iteration=iteration, NACA=NACA, PANE=PANE)
+            (out, err) = call(airfoil, alfas=alpha, Reynolds=Reynolds,
+                              output='Cp', iteration=iteration,
+                              NACA=NACA, PANE=PANE, GDES=GDES,
+                              xfoil_output=xfoil_output)
     coefficients = {}
     # Data from file
     Data = output_reader(filename, output='Cp', delete=delete)
@@ -978,10 +1000,14 @@ def find_pressure_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
         for i in range(len(Data[key])):
             coefficients['x'] = coefficients['x']*chord
             coefficients['y'] = coefficients['y']*chord
-    return coefficients
+    if xfoil_output:
+        return coefficients, (out, err)
+    else:
+        return coefficients
 
 
-def find_alpha_L_0(airfoil, Reynolds=0, iteration=10, NACA=True):
+def find_alpha_L_0(airfoil, Reynolds=0, iteration=10, NACA=True,
+                   xfoil_output=False):
     """Find zero lift angle of attack.
 
     Calculate the angle of attack where the lift coefficient
@@ -990,12 +1016,16 @@ def find_alpha_L_0(airfoil, Reynolds=0, iteration=10, NACA=True):
     filename = file_name(airfoil, output='Alfa_L_0')
     # If file already exists, there no need to recalculate it.
     if not os.path.isfile(filename):
-        call(airfoil, output='Alfa_L_0', NACA=NACA)
+        (out, err) = call(airfoil, output='Alfa_L_0', NACA=NACA,
+                          xfoil_output=xfoil_output)
     alpha = output_reader(filename, output='Alfa_L_0')['alpha'][0]
-    return alpha
+    if xfoil_output:
+        return alpha, (out, err)
+    else:
+        return alpha
 
 
-def M_crit(airfoil, pho, speed_sound, lift, c):
+def M_crit(airfoil, pho, speed_sound, lift, c, xfoil_output=False):
     """Calculate the Critical Mach.
 
     This function was not validated.
@@ -1011,7 +1041,8 @@ def M_crit(airfoil, pho, speed_sound, lift, c):
     Data_crit['alpha'] = 0
     for M in M_list:
         cl = (np.sqrt(1 - M**2)/(M**2))*2*lift/pho/(speed_sound)**2/c
-        call(airfoil, alfas, output='Polar', NACA=True)
+        (out, err) = call(airfoil, alfas, output='Polar', NACA=True,
+                          xfoil_output=xfoil_output)
         filename = file_name(airfoil, alfas, output='Polar')
         Data = output_reader(filename, ' ', 10)
         previous_iteration = Data_crit['CL']  # noqa W0612
@@ -1022,7 +1053,10 @@ def M_crit(airfoil, pho, speed_sound, lift, c):
                 Data_crit['CL'] = Data['CL'][i]
                 Data_crit['alpha'] = Data['alpha'][i]
         # if Data_crit['CL']==previous_iteration:
-    return Data_crit
+    if xfoil_output:
+        return Data_crit, (out, err)
+    else:
+        return Data_crit
 
 
 if __name__ == '__main__':
