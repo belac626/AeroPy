@@ -23,7 +23,10 @@ import numpy as np
 
 
 class NonBlockingStreamReader:
-    """Create readable subprocess stream on separate thread."""
+    """Create readable subprocess stream on separate thread.
+
+    http://eyalarubas.com/python-subproc-nonblock.html
+    """
 
     def __init__(self, stream):
         """Instantiate.
@@ -162,7 +165,6 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
                 output = nbsr.readline(0.1)
                 # 0.1 secs to let the shell output the result
                 if not output:
-                    print('[No more data]')
                     break
                 print(output)
 
