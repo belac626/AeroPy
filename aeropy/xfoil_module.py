@@ -1017,7 +1017,7 @@ def find_pressure_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
     # If file already exists, there is no need to recalculate it.
     if not os.path.isfile(filename):
             call(airfoil, alfas=alpha, Reynolds=Reynolds,
-                 output='Cp', iteration=iteration, echo=echo
+                 output='Cp', iteration=iteration, echo=echo,
                  NACA=NACA, PANE=PANE, GDES=GDES)
     coefficients = {}
     # Data from file
