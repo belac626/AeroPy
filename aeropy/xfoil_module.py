@@ -965,8 +965,8 @@ def file_name(airfoil, alfas='none', output='Cp'):  #noqa R701
             # In case it is only for one angle of attack, the same
             # angle will be repeated. This is done to keep the
             # formating
-            if type(alfas) == int or type(alfas) == float or \
-               type(alfas) == np.float64 or type(alfas) == np.float32:
+            if (type(alfas) == int or type(alfas) == float or
+               type(alfas) == np.float64 or type(alfas) == np.float32):
                 alfas = [alfas]
                 alfa_i = alfa_for_file(alfas[0])
                 alfa_f = alfa_for_file(alfas[-1])
@@ -982,8 +982,9 @@ def file_name(airfoil, alfas='none', output='Cp'):  #noqa R701
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10, echo=False,
-                      NACA=True, delete=False, PANE=False, GDES=False):
+def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10,  # noqa R701
+                      echo=False, NACA=True, delete=False,
+                      PANE=False, GDES=False):
     """Calculate the coefficients of an airfoil.
 
     Includes lift, drag, moment, friction etc coefficients.
@@ -1004,7 +1005,8 @@ def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10, echo=False,
                 coefficients[key] = Data[key]
                 coefficients['LtoD'] = [Data['CL'][i]/Data['CD'][i]
                                         for i in range(len(Data['alpha']))]
-            elif type(alpha) == float:
+            elif (type(alpha) == float or type(alpha) == int
+                  or type(alpha) == np.float64 or type(alpha) == np.float32):
                 coefficients[key] = Data[key][0]
                 coefficients['LtoD'] = Data['CL'][0]/Data['CD'][0]
         except:  #noqa E722
