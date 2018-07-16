@@ -1,6 +1,4 @@
 """XFOIL Python interface."""
-from __future__ import print_function
-
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #                       Import necessary modules
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -10,6 +8,8 @@ import os  # To check for already existing files and delete them
 import shutil  # Modules necessary for saving multiple plots
 import subprocess as sp
 import time
+from queue import Empty, Queue
+from threading import Thread
 
 import numpy as np
 
@@ -18,13 +18,57 @@ import numpy as np
 # @author: Pedro Leal
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#                     Class for reading xfoil output
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+class NonBlockingStreamReader:
+    """Create readable subprocess stream on separate thread."""
+
+    def __init__(self, stream):
+        """Instantiate.
+
+        stream: the stream to read from.
+                Usually a process' stdout or stderr.
+        """
+        self._s = stream
+        self._q = Queue()
+
+        def _populateQueue(stream, queue):
+            """Collect lines from 'stream' and put them in 'queue'."""
+            while True:
+                line = stream.readline()
+                if line:
+                    queue.put(line)
+                else:
+                    raise UnexpectedEndOfStream
+
+        self._t = Thread(target=_populateQueue, args=(self._s, self._q))
+        self._t.daemon = True
+        self._t.start()  # start collecting lines from the stream
+
+    def readline(self, timeout=None):
+        """Read non-blocked stream from subprocess in thread."""
+        try:
+            return self._q.get(block=timeout is not None, timeout=timeout)
+        except Empty:
+            return None
+
+
+class UnexpectedEndOfStream(Exception):
+    """Exception for queue population error."""
+
+    pass
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #                           Core Functions
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
          plots=False, NACA=True, GDES=False, iteration=10, flap=None,
-         PANE=False, NORM=True, xfoil_output=False):
+         PANE=False, NORM=True):
     """Call xfoil through Python.
 
     The input variables are:
@@ -103,25 +147,26 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #                               Functions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    cmdlist = str()
 
-    def appendCmd(cmdlist: str, cmd: str, echo=True):
-        """Build a single command string to sp.communicate to xfoil."""
-        # """Submit a command through PIPE to the command lineself.
-        #
-        # (Therefore leading the commands to xfoil.)
-        #
-        # @author: Hakan Tiftikci
-        # """
-        # ps.stdin.write(cmd + '\n')
-        # if echo:
-        #     print(cmd)
+    def issueCmd(cmd: str, echo=True):
+        """Submit a command through PIPE to the command lineself.
+
+        (Therefore leading the commands to xfoil.)
+
+        @author: Hakan Tiftikci
+        """
+        xfoil.stdin.write(cmd + '\n')
         if echo:
             print(cmd)
-        cmdlist += cmd + '\n'
-        return cmdlist
+            while True:
+                output = nbsr.readline(0.1)
+                # 0.1 secs to let the shell output the result
+                if not output:
+                    print('[No more data]')
+                    break
+                print(output)
 
-    def submit(output, alfa, cmdlist):
+    def submit(output, alfa):
         """Submit job to xfoil and saves file.
 
         Standard output file= function_airfoil_alfa.txt, where alfa has
@@ -135,13 +180,14 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
         @author: Pedro Leal (Based on Hakan Tiftikci's code)
         """
         if output == "Alfa_L_0":
-            cmdlist = appendCmd(cmdlist, 'CL 0')
+            issueCmd('CL 0')
 
         else:
             # Submit job for given angle of attack
-            cmdlist = appendCmd(cmdlist, f'ALFA {alfa:4f}')
+            issueCmd(f'ALFA {alfa:4f}')
+
             if plots is True:
-                cmdlist = appendCmd(cmdlist, 'HARD')
+                issueCmd('HARD')
                 shutil.copyfile('plot.ps',
                                 f'plot_{output}_{airfoil}_{alfa}.ps')
             if output == 'Cp':
@@ -152,7 +198,7 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
                 except OSError:
                     pass
                 # Before writing file, denormalize it
-                cmdlist = appendCmd(cmdlist, f'CPWR {filename}')
+                issueCmd(f'CPWR {filename}')
             elif output == 'Dump':
                 # Creating the file with the Pressure Coefficients
                 filename = file_name(airfoil, alfas, output)
@@ -160,7 +206,7 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
                     os.remove(filename)
                 except OSError:
                     pass
-                cmdlist = appendCmd(cmdlist, f'DUMP {filename}')
+                issueCmd(f'DUMP {filename}')
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #                Characteristics of the simulation
@@ -213,84 +259,87 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
                      stdout=sp.PIPE,
                      stderr=sp.PIPE,
                      startupinfo=startupinfo,
-                     encoding='utf8')
-    # Turn graphics off (since we are only shelling out to xfoil)
-    cmdlist = appendCmd(cmdlist, 'PLOP')
-    cmdlist = appendCmd(cmdlist, 'G')
-    cmdlist = appendCmd(cmdlist, '')
+                     encoding='utf8',
+                     bufsize=1)
+    # wrap with NonBlockingStreamReader object
+    nbsr = NonBlockingStreamReader(xfoil.stdout)
+    # Turn graphics off (since we are only sending and reading text)
+    issueCmd('PLOP')
+    issueCmd('G')
+    issueCmd('')
     # Loading geometry
     if NORM is True:
-        cmdlist = appendCmd(cmdlist, 'NORM')
+        issueCmd('NORM')
     if NACA is False:
-        cmdlist = appendCmd(cmdlist, f'load {airfoil}')
+        issueCmd(f'load {airfoil}')
     else:
-        cmdlist = appendCmd(cmdlist, f'{airfoil}')
+        issueCmd(f'{airfoil}')
 
     # Once you load a set of points in xfoil you can create a name
-    cmdlist = appendCmd(cmdlist, f'{airfoil}')
+    issueCmd(f'{airfoil}')
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #             Adapting points for better plots
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     if PANE is True:
-        cmdlist = appendCmd(cmdlist, 'PANE')
+        issueCmd('PANE')
     if GDES is True:
-        cmdlist = appendCmd(cmdlist, 'GDES')   # enter GDES menu
-        cmdlist = appendCmd(cmdlist, 'CADD')   # add points at corners
-        cmdlist = appendCmd(cmdlist, '')       # accept default input
-        cmdlist = appendCmd(cmdlist, '')       # accept default input
-        cmdlist = appendCmd(cmdlist, '')       # accept default input
-        cmdlist = appendCmd(cmdlist, '')       # accept default input
-        cmdlist = appendCmd(cmdlist, 'PANE')   # regenerate paneling
+        issueCmd('GDES')   # enter GDES menu
+        issueCmd('CADD')   # add points at corners
+        issueCmd('')       # accept default input
+        issueCmd('')       # accept default input
+        issueCmd('')       # accept default input
+        issueCmd('')       # accept default input
+        issueCmd('PANE')   # regenerate paneling
     # ==============================================================
     #                              Flaps
     # ===============================================================
     if flap is not None:
-        cmdlist = appendCmd(cmdlist, 'GDES')  # enter GDES menu
-        cmdlist = appendCmd(cmdlist, 'FLAP')  # enter FLAP menu
-        cmdlist = appendCmd(cmdlist, f'{flap[0]}')  # insert x location
-        cmdlist = appendCmd(cmdlist, f'{flap[1]}')  # insert y location
+        issueCmd('GDES')  # enter GDES menu
+        issueCmd('FLAP')  # enter FLAP menu
+        issueCmd(f'{flap[0]}')  # insert x location
+        issueCmd(f'{flap[1]}')  # insert y location
         # insesrt deflection in degrees
-        cmdlist = appendCmd(cmdlist, f'{flap[2]}')
+        issueCmd(f'{flap[2]}')
         # set buffer airfoil as current airfoil
-        cmdlist = appendCmd(cmdlist, 'eXec')
-        cmdlist = appendCmd(cmdlist, '')      # exit GDES menu
+        issueCmd('eXec')
+        issueCmd('')      # exit GDES menu
     # If output equals Coordinates, no analysis will be realized, only the
     # coordinates of the shape will be outputed
     if output == 'Coordinates':
-        cmdlist = appendCmd(cmdlist, 'SAVE')
-        cmdlist = appendCmd(cmdlist, output + '_' + airfoil)
+        issueCmd('SAVE')
+        issueCmd(output + '_' + airfoil)
         # In case there is alread a file with that name, it will replace it.
         # The yes stands for YES otherwise Xfoil will do nothing with it.
-        cmdlist = appendCmd(cmdlist, 'Y')
+        issueCmd('Y')
     else:
         # Opening OPER module in Xfoil
-        cmdlist = appendCmd(cmdlist, 'OPER')
+        issueCmd('OPER')
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         #                Changing number of iterations
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        cmdlist = appendCmd(cmdlist, f'ITER {iteration}')
+        issueCmd(f'ITER {iteration}')
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         #                Applying effects of vicosity
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         if Viscid is True:
             # Defining the system as viscous
-            cmdlist = appendCmd(cmdlist, 'v')
+            issueCmd('v')
             # Defining Reynolds number
-            cmdlist = appendCmd(cmdlist, f'{Reynolds}')
+            issueCmd(f'{Reynolds}')
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         #    Defining Mach number for Prandtl-Gauber correlation
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        cmdlist = appendCmd(cmdlist, f'MACH {Mach}')
+        issueCmd(f'MACH {Mach}')
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         #                     Submitting
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         if output == 'Polar' or output == 'Alfa_L_0':
-            cmdlist = appendCmd(cmdlist, 'PACC')
+            issueCmd('PACC')
             # All file names in this library are generated by the
             # filename functon.
             filename = file_name(airfoil, alfas, output)
@@ -299,30 +348,25 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
             except OSError:
                 pass
             # polar accumulation filename (read from output_reader function)
-            cmdlist = appendCmd(cmdlist, f'{filename}')
+            issueCmd(f'{filename}')
             # do not save a dump file
-            cmdlist = appendCmd(cmdlist, '')
+            issueCmd('')
 
         # For several angles of attack
         if Multiple is True:
             for alfa in alfas:
-                submit(output, alfa, cmdlist)
+                submit(output, alfa)
         # For only one angle of attack
         elif Multiple is False:
-            submit(output, alfas, cmdlist)
-    #
-    #     # Exiting from OPER mode
-    #     cmdlist = appendCmd(cmdlist, '')
-    # # Exiting from xfoil
-    # cmdlist = appendCmd(cmdlist, 'QUIT')
-    try:
-        (out, err) = xfoil.communicate(cmdlist, timeout=3)
-    except sp.TimeoutExpired:
-        xfoil.kill()
-        print('Xfoil killed: timeout expired')
-        (out, err) = xfoil.communicate()
-    if xfoil_output:
-        return (out, err)
+            submit(output, alfas)
+
+        # Exiting from OPER mode
+        issueCmd('')
+    # Exiting from xfoil
+    issueCmd('QUIT')
+
+    xfoil.stdin.close()
+    xfoil.wait()
 
 
 def create_input(x, y_u, y_l=None,
@@ -937,24 +981,17 @@ def file_name(airfoil, alfas='none', output='Cp'):  #noqa R701
 
 
 def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
-                      NACA=True, delete=False, PANE=False, GDES=False,
-                      xfoil_output=False):
+                      NACA=True, delete=False, PANE=False, GDES=False):
     """Calculate the coefficients of an airfoil.
 
     Includes lift, drag, moment, friction etc coefficients.
     """
     filename = file_name(airfoil, alpha, output='Polar')
-    if xfoil_output:
-        try:
-            os.remove(filename)
-        except OSError:
-            pass
     # If file already exists, there is no need to recalculate it.
     if not os.path.isfile(filename):
-        (out, err) = call(airfoil, alfas=alpha, Reynolds=Reynolds,
-                          output='Polar', iteration=iteration,
-                          NACA=NACA, PANE=PANE, GDES=GDES,
-                          xfoil_output=xfoil_output)
+        call(airfoil, alfas=alpha, Reynolds=Reynolds,
+             output='Polar', iteration=iteration,
+             NACA=NACA, PANE=PANE, GDES=GDES)
 
     coefficients = {}
     # Data from file
@@ -966,30 +1003,20 @@ def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
             coefficients[key] = None
     if delete:
         os.remove(filename)
-    if xfoil_output:
-        return coefficients, (out, err)
-    else:
-        return coefficients
+    return coefficients
 
 
 def find_pressure_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
                                NACA=True, use_previous=False, chord=1.,
-                               PANE=False, GDES=False, delete=False,
-                               xfoil_output=False):
+                               PANE=False, GDES=False, delete=False):
     """Calculate the pressure coefficients of an airfoil."""
     filename = file_name(airfoil, alpha, output='Cp')
 
     # If file already exists, there is no need to recalculate it.
-    if not use_previous:
-        (out, err) = call(airfoil, alfas=alpha, Reynolds=Reynolds,
-                          output='Cp', iteration=iteration, NACA=NACA,
-                          PANE=PANE, GDES=GDES, xfoil_output=xfoil_output)
-    else:
-        if not os.path.isfile(filename):
-            (out, err) = call(airfoil, alfas=alpha, Reynolds=Reynolds,
-                              output='Cp', iteration=iteration,
-                              NACA=NACA, PANE=PANE, GDES=GDES,
-                              xfoil_output=xfoil_output)
+    if not os.path.isfile(filename):
+            call(airfoil, alfas=alpha, Reynolds=Reynolds,
+                 output='Cp', iteration=iteration,
+                 NACA=NACA, PANE=PANE, GDES=GDES)
     coefficients = {}
     # Data from file
     Data = output_reader(filename, output='Cp', delete=delete)
@@ -1000,14 +1027,10 @@ def find_pressure_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
         for i in range(len(Data[key])):
             coefficients['x'] = coefficients['x']*chord
             coefficients['y'] = coefficients['y']*chord
-    if xfoil_output:
-        return coefficients, (out, err)
-    else:
-        return coefficients
+    return coefficients
 
 
-def find_alpha_L_0(airfoil, Reynolds=0, iteration=10, NACA=True,
-                   xfoil_output=False):
+def find_alpha_L_0(airfoil, Reynolds=0, iteration=10, NACA=True):
     """Find zero lift angle of attack.
 
     Calculate the angle of attack where the lift coefficient
@@ -1016,16 +1039,12 @@ def find_alpha_L_0(airfoil, Reynolds=0, iteration=10, NACA=True,
     filename = file_name(airfoil, output='Alfa_L_0')
     # If file already exists, there no need to recalculate it.
     if not os.path.isfile(filename):
-        (out, err) = call(airfoil, output='Alfa_L_0', NACA=NACA,
-                          xfoil_output=xfoil_output)
+        call(airfoil, output='Alfa_L_0', NACA=NACA)
     alpha = output_reader(filename, output='Alfa_L_0')['alpha'][0]
-    if xfoil_output:
-        return alpha, (out, err)
-    else:
-        return alpha
+    return alpha
 
 
-def M_crit(airfoil, pho, speed_sound, lift, c, xfoil_output=False):
+def M_crit(airfoil, pho, speed_sound, lift, c):
     """Calculate the Critical Mach.
 
     This function was not validated.
@@ -1041,8 +1060,7 @@ def M_crit(airfoil, pho, speed_sound, lift, c, xfoil_output=False):
     Data_crit['alpha'] = 0
     for M in M_list:
         cl = (np.sqrt(1 - M**2)/(M**2))*2*lift/pho/(speed_sound)**2/c
-        (out, err) = call(airfoil, alfas, output='Polar', NACA=True,
-                          xfoil_output=xfoil_output)
+        call(airfoil, alfas, output='Polar', NACA=True)
         filename = file_name(airfoil, alfas, output='Polar')
         Data = output_reader(filename, ' ', 10)
         previous_iteration = Data_crit['CL']  # noqa W0612
@@ -1053,10 +1071,7 @@ def M_crit(airfoil, pho, speed_sound, lift, c, xfoil_output=False):
                 Data_crit['CL'] = Data['CL'][i]
                 Data_crit['alpha'] = Data['alpha'][i]
         # if Data_crit['CL']==previous_iteration:
-    if xfoil_output:
-        return Data_crit, (out, err)
-    else:
-        return Data_crit
+    return Data_crit
 
 
 if __name__ == '__main__':
