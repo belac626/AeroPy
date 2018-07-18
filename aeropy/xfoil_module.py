@@ -41,10 +41,10 @@ class NonBlockingStreamReader:
             """Collect lines from 'stream' and put them in 'queue'."""
             while True:
                 line = stream.readline()
-                if line:
+                try:  # if line:
                     queue.put(line)
-                else:
-                    raise UnexpectedEndOfStream
+                except UnexpectedEndOfStream:  # else:
+                    pass  # raise UnexpectedEndOfStream
 
         self._t = Thread(target=_populateQueue, args=(self._s, self._q))
         self._t.daemon = True
