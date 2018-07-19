@@ -162,7 +162,7 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
         if echo:
             print(cmd)
             while True:
-                output = nbsr.readline(0.05)
+                output = nbsr.readline(0.1)
                 # 0.1 secs to let the shell output the result
                 if not output:
                     break
