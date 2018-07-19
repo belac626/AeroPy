@@ -310,8 +310,7 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
         issueCmd('OPER')  # Opening OPER module in Xfoil
         issueCmd(f'ITER {iteration}')  # Changing number of iterations
         if Viscid:
-            issueCmd('v')  # Defining the system as viscous
-            issueCmd(f'{Reynolds}')  # Defining Reynolds number
+            issueCmd(f'v {Reynolds}')  # Defining Reynolds number
         # Defining Mach number for Prandtl-Gauber correlation
         issueCmd(f'MACH {Mach}')
         if output == 'Polar' or output == 'Alfa_L_0':
