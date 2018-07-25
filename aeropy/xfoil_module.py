@@ -69,7 +69,8 @@ class UnexpectedEndOfStream(Exception):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
+def call(airfoil, dir='', alfas='none', output='Cp',  # noqa C901
+         Reynolds=0, Mach=0,
          plots=False, echo=False, NACA=True, GDES=False, iteration=10,
          flap=None, PANE=False, NORM=True):
     """Call xfoil through Python.
@@ -80,6 +81,11 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
            filewhere the airfoil geometry is stored (variable airfoil).
            If NACA is True, airfoil is the naca series of the airfoil
            (i.e.: naca2244). By default NACA is False.
+
+    :param dir: directory where airfoils and outputs are stored.
+           For example: '.\\xfoil\\output'
+           By default, no dir is supplied and output will be in same dir as
+           xfoil.
 
     :param alfas: list/array/float/int of angles of attack.
 
@@ -168,7 +174,7 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
                     break
                 print(output)
 
-    def submit(output, alfa):
+    def submit(output, alfa, dir=dir):
         """Submit job to xfoil and saves file.
 
         Standard output file= function_airfoil_alfa.txt, where alfa has
@@ -196,19 +202,19 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
                 # Creating the file with the Pressure Coefficients
                 filename = file_name(airfoil, alfas, output)
                 try:
-                    os.remove(filename)
+                    os.remove(os.path.join(dir, filename))
                 except OSError:
                     pass
                 # Before writing file, denormalize it
-                issueCmd(f'CPWR {filename}')
+                issueCmd(f'CPWR {dir}{filename}')
             elif output == 'Dump':
                 # Creating the file with the Pressure Coefficients
                 filename = file_name(airfoil, alfas, output)
                 try:
-                    os.remove(filename)
+                    os.remove(os.path.join(dir, filename))
                 except OSError:
                     pass
-                issueCmd(f'DUMP {filename}')
+                issueCmd(f'DUMP {dir}{filename}')
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #                Characteristics of the simulation
@@ -275,7 +281,7 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
     if NACA:
         issueCmd(f'{airfoil}')
     else:
-        issueCmd(f'load {airfoil}')
+        issueCmd(fr'load {dir}\{airfoil}')
     # Once you load a set of points in xfoil you can create a name
     issueCmd(f'{airfoil}')
     if PANE:  # Adapting points for better plots
@@ -302,7 +308,7 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
     # coordinates of the shape will be outputed
     if output == 'Coordinates':
         issueCmd('SAVE')
-        issueCmd(output + '_' + airfoil)
+        issueCmd(dir + output + '_' + airfoil)
         # In case there is alread a file with that name, it will replace it.
         # The yes stands for YES otherwise Xfoil will do nothing with it.
         issueCmd('Y')
@@ -319,11 +325,11 @@ def call(airfoil, alfas='none', output='Cp', Reynolds=0, Mach=0,  # noqa C901
             # filename functon.
             filename = file_name(airfoil, alfas, output)
             try:
-                os.remove(filename)
+                os.remove(os.path.join(dir, filename))
             except OSError:
                 pass
             # polar accumulation filename (read from output_reader function)
-            issueCmd(f'{filename}')
+            issueCmd(fr'{dir}\{filename}')
             issueCmd('')  # do not save a dump file
         if Multiple:  # For several angles of attack
             for alfa in alfas:
@@ -567,7 +573,7 @@ def prepare_xfoil(Coordinates_Upper, Coordinates_Lower, chord,  # noqa C901
         return Coordinates
 
 
-def output_reader(filename, separator='\t', output=None,  # noqa C901
+def output_reader(filename, dir='', separator='\t', output=None,  # noqa C901
                   rows_to_skip=0, header=0, delete=False, structure=False,
                   type_structure=None):
     """Function that opens files of any kind.
@@ -576,6 +582,11 @@ def output_reader(filename, separator='\t', output=None,  # noqa C901
 
     Inputs:
         - filename: just the name of the file to read.
+
+        - dir: directory where airfoils and outputs are stored.
+          For example:  '.\\xfoil\\output'
+          By default, no dir is supplied and output will be in same dir as
+          xfoil.
 
         - separator: Main kind of separator in file. The code will
           replace any variants of this separator for processing. Extra
@@ -681,7 +692,7 @@ def output_reader(filename, separator='\t', output=None,  # noqa C901
     else:
         separator_list = separator
     structure_count = 0
-    with open(filename, "r") as myfile:
+    with open(os.path.join(dir, filename), "r") as myfile:
         # Jump first lines which are useless
         for line in myfile:
             if count_skip < rows_to_skip:
@@ -855,7 +866,7 @@ def output_reader(filename, separator='\t', output=None,  # noqa C901
                 # else DO NOTHING!
     # If delete file True, remove file from directory
     if delete:
-        os.remove(filename)
+        os.remove(os.path.join(dir, filename))
     return Data
 
 
@@ -947,7 +958,8 @@ def file_name(airfoil, alfas='none', output='Cp'):  #noqa R701
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10,  # noqa R701
+def find_coefficients(airfoil, alpha, dir='', Reynolds=0,  # noqa R701
+                      iteration=10,
                       echo=False, NACA=True, delete=False,
                       PANE=False, GDES=False):
     """Calculate the coefficients of an airfoil.
@@ -956,14 +968,14 @@ def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10,  # noqa R701
     """
     filename = file_name(airfoil, alpha, output='Polar')
     # If file already exists, there is no need to recalculate it.
-    if not os.path.isfile(filename):
-        call(airfoil, alfas=alpha, Reynolds=Reynolds,
+    if not os.path.isfile(os.path.join(dir, filename)):
+        call(airfoil, dir=dir, alfas=alpha, Reynolds=Reynolds,
              output='Polar', iteration=iteration, echo=echo,
              NACA=NACA, PANE=PANE, GDES=GDES)
 
     coefficients = {}
     # Data from file
-    Data = output_reader(filename, output='Polar', delete=delete)
+    Data = output_reader(filename, dir=dir, output='Polar', delete=delete)
     for key in Data:
         try:
             if type(alpha) == list:
@@ -977,24 +989,25 @@ def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10,  # noqa R701
         except:  #noqa E722
             coefficients[key] = None
     if delete:
-        os.remove(filename)
+        os.remove(os.path.join(dir, filename))
     return coefficients
 
 
-def find_pressure_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
-                               echo=False, NACA=True, use_previous=False,
-                               chord=1., PANE=False, GDES=False, delete=False):
+def find_pressure_coefficients(airfoil, alpha, dir='', Reynolds=0,
+                               iteration=10, echo=False, NACA=True,
+                               use_previous=False, chord=1., PANE=False,
+                               GDES=False, delete=False):
     """Calculate the pressure coefficients of an airfoil."""
     filename = file_name(airfoil, alpha, output='Cp')
 
     # If file already exists, there is no need to recalculate it.
-    if not os.path.isfile(filename):
-            call(airfoil, alfas=alpha, Reynolds=Reynolds,
+    if not os.path.isfile(os.path.join(dir, filename)):
+            call(airfoil, dir=dir, alfas=alpha, Reynolds=Reynolds,
                  output='Cp', iteration=iteration, echo=echo,
                  NACA=NACA, PANE=PANE, GDES=GDES)
     coefficients = {}
     # Data from file
-    Data = output_reader(filename, output='Cp', delete=delete)
+    Data = output_reader(filename, dir=dir, output='Cp', delete=delete)
 
     for key in Data:
         coefficients[key] = Data[key]
@@ -1005,7 +1018,8 @@ def find_pressure_coefficients(airfoil, alpha, Reynolds=0, iteration=10,
     return coefficients
 
 
-def find_alpha_L_0(airfoil, Reynolds=0, iteration=10, NACA=True, echo=False):
+def find_alpha_L_0(airfoil, dir='', Reynolds=0, iteration=10,
+                   NACA=True, echo=False):
     """Find zero lift angle of attack.
 
     Calculate the angle of attack where the lift coefficient
@@ -1013,13 +1027,13 @@ def find_alpha_L_0(airfoil, Reynolds=0, iteration=10, NACA=True, echo=False):
     """
     filename = file_name(airfoil, output='Alfa_L_0')
     # If file already exists, there no need to recalculate it.
-    if not os.path.isfile(filename):
-        call(airfoil, output='Alfa_L_0', NACA=NACA, echo=echo)
-    alpha = output_reader(filename, output='Alfa_L_0')['alpha'][0]
+    if not os.path.isfile(os.path.join(dir, filename)):
+        call(airfoil, dir=dir, output='Alfa_L_0', NACA=NACA, echo=echo)
+    alpha = output_reader(filename, dir=dir, output='Alfa_L_0')['alpha'][0]
     return alpha
 
 
-def M_crit(airfoil, pho, speed_sound, lift, c, echo=False):
+def M_crit(airfoil, pho, speed_sound, lift, c, dir='', echo=False):
     """Calculate the Critical Mach.
 
     This function was not validated.
@@ -1035,9 +1049,9 @@ def M_crit(airfoil, pho, speed_sound, lift, c, echo=False):
     Data_crit['alpha'] = 0
     for M in M_list:
         cl = (np.sqrt(1 - M**2)/(M**2))*2*lift/pho/(speed_sound)**2/c
-        call(airfoil, alfas, output='Polar', NACA=True, echo=echo)
+        call(airfoil, alfas, dir=dir, output='Polar', NACA=True, echo=echo)
         filename = file_name(airfoil, alfas, output='Polar')
-        Data = output_reader(filename, ' ', 10)
+        Data = output_reader(filename, ' ', 10, dir=dir)
         previous_iteration = Data_crit['CL']  # noqa W0612
         for i in range(0, len(Data['CL'])):
             if Data['CL'][i] >= cl and M > Data_crit['M']:
@@ -1047,26 +1061,3 @@ def M_crit(airfoil, pho, speed_sound, lift, c, echo=False):
                 Data_crit['alpha'] = Data['alpha'][i]
         # if Data_crit['CL']==previous_iteration:
     return Data_crit
-
-
-if __name__ == '__main__':
-    print(find_coefficients('naca0012', 1., Reynolds=1000000, NACA=True))
-
-    import matplotlib.pyplot as plt
-    upper = {'x': [0, .1, 10, 20, 30], 'y': [0, 2, 4, 2, 1]}
-    lower = {'x': [0, .1, 10, 20, 30], 'y': [0, -10, -2, -1, 0]}
-    plt.plot(lower['x'], lower['y'], 'r')
-    plt.plot(upper['x'], upper['y'], 'r', label='original data')
-    rotated_upper, rotated_lower = prepare_xfoil(upper, lower, 1.0,
-                                                 reposition=True)
-    print(rotated_upper)
-    print(rotated_lower)
-
-    plt.plot(rotated_lower['x'], rotated_lower['y'], 'b')
-    plt.plot(rotated_upper['x'], rotated_upper['y'], 'b',
-             label='after LE rotation/translation')
-    plt.legend(loc='best')
-    plt.xlabel('x-coordinate')
-    plt.ylabel('y-coordinate')
-    plt.grid()
-    plt.show()
