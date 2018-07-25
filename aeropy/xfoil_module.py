@@ -963,7 +963,7 @@ def find_coefficients(airfoil, alpha, Reynolds=0, iteration=10,  # noqa R701
 
     coefficients = {}
     # Data from file
-    Data = output_reader(filename, output='Polar', delete=False)
+    Data = output_reader(filename, output='Polar', delete=delete)
     for key in Data:
         try:
             if type(alpha) == list:
