@@ -206,7 +206,7 @@ def call(airfoil, dir='', alfas='none', output='Cp',  # noqa C901
                 except OSError:
                     pass
                 # Before writing file, denormalize it
-                issueCmd(f'CPWR {dir}{filename}')
+                issueCmd(fr'CPWR {dir}\{filename}')
             elif output == 'Dump':
                 # Creating the file with the Pressure Coefficients
                 filename = file_name(airfoil, alfas, output)
@@ -214,7 +214,7 @@ def call(airfoil, dir='', alfas='none', output='Cp',  # noqa C901
                     os.remove(os.path.join(dir, filename))
                 except OSError:
                     pass
-                issueCmd(f'DUMP {dir}{filename}')
+                issueCmd(fr'DUMP {dir}\{filename}')
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #                Characteristics of the simulation
