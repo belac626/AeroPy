@@ -5,6 +5,7 @@
 import datetime
 import math
 import os  # To check for already existing files and delete them
+import platform as pf
 import shutil  # Modules necessary for saving multiple plots
 import subprocess as sp
 import time
@@ -18,7 +19,7 @@ import numpy as np
 # @author: Pedro Leal
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#                     Class for reading xfoil output
+#                     Classes for reading xfoil output
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
@@ -69,7 +70,7 @@ class UnexpectedEndOfStream(Exception):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-def call(airfoil, dir='', alfas='none', output='Cp',  # noqa C901
+def call(airfoil, indir='', outdir='', alfas='none', output='Cp',  # noqa C901
          Reynolds=0, Mach=0,
          plots=False, echo=False, NACA=True, GDES=False, iteration=10,
          flap=None, PANE=False, NORM=True):
@@ -174,7 +175,7 @@ def call(airfoil, dir='', alfas='none', output='Cp',  # noqa C901
                     break
                 print(output)
 
-    def submit(output, alfa, dir=dir):
+    def submit(output, alfa, dir=outdir):
         """Submit job to xfoil and saves file.
 
         Standard output file= function_airfoil_alfa.txt, where alfa has
@@ -206,7 +207,8 @@ def call(airfoil, dir='', alfas='none', output='Cp',  # noqa C901
                 except OSError:
                     pass
                 # Before writing file, denormalize it
-                issueCmd(fr'CPWR {dir}\{filename}')
+                path_to_output = os.path.join(dir, filename)
+                issueCmd(fr'CPWR {path_to_output}')
             elif output == 'Dump':
                 # Creating the file with the Pressure Coefficients
                 filename = file_name(airfoil, alfas, output)
@@ -214,7 +216,8 @@ def call(airfoil, dir='', alfas='none', output='Cp',  # noqa C901
                     os.remove(os.path.join(dir, filename))
                 except OSError:
                     pass
-                issueCmd(fr'DUMP {dir}\{filename}')
+                path_to_output = os.path.join(dir, filename)
+                issueCmd(fr'DUMP {path_to_output}')
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #                Characteristics of the simulation
@@ -258,14 +261,20 @@ def call(airfoil, dir='', alfas='none', output='Cp',  # noqa C901
     # The following keys avoid the xfoil pop-up
     # source: http://stackoverflow.com/questions/1765078/how-to-avoid-
     # console-window-with-pyw-file-containing-os-system-call
-    startupinfo = sp.STARTUPINFO()
-    startupinfo.dwFlags |= sp.STARTF_USESHOWWINDOW
+    if pf.system() == "Windows":
+        startupinfo = sp.STARTUPINFO()
+        startupinfo.dwFlags |= sp.STARTF_USESHOWWINDOW
+        xfoil_file = 'xfoil.exe'
+    else:
+        startupinfo = None
+        xfoil_file = 'Xfoil.app/Contents/Resources/xfoil'
 
     # Calling xfoil with Poper
-    xfoil = sp.Popen(['xfoil.exe'],
+    xfoil = sp.Popen([xfoil_file],
                      stdin=sp.PIPE,
                      stdout=sp.PIPE,
                      stderr=sp.PIPE,
+                     cwd=os.getcwd(),
                      startupinfo=startupinfo,
                      encoding='utf8',
                      bufsize=1)
@@ -281,7 +290,8 @@ def call(airfoil, dir='', alfas='none', output='Cp',  # noqa C901
     if NACA:
         issueCmd(f'{airfoil}')
     else:
-        issueCmd(fr'load {dir}\{airfoil}')
+        path_to_airfoil = os.path.join(indir, airfoil)
+        issueCmd(fr'load {path_to_airfoil}')
     # Once you load a set of points in xfoil you can create a name
     issueCmd(f'{airfoil}')
     if PANE:  # Adapting points for better plots
@@ -308,7 +318,8 @@ def call(airfoil, dir='', alfas='none', output='Cp',  # noqa C901
     # coordinates of the shape will be outputed
     if output == 'Coordinates':
         issueCmd('SAVE')
-        issueCmd(dir + output + '_' + airfoil)
+        path_to_coord = os.path.join(outdir, output + '_' + airfoil)
+        issueCmd(path_to_coord)
         # In case there is alread a file with that name, it will replace it.
         # The yes stands for YES otherwise Xfoil will do nothing with it.
         issueCmd('Y')
@@ -325,11 +336,12 @@ def call(airfoil, dir='', alfas='none', output='Cp',  # noqa C901
             # filename functon.
             filename = file_name(airfoil, alfas, output)
             try:
-                os.remove(os.path.join(dir, filename))
+                os.remove(os.path.join(outdir, filename))
             except OSError:
                 pass
             # polar accumulation filename (read from output_reader function)
-            issueCmd(fr'{dir}\{filename}')
+            path_to_output = os.path.join(outdir, filename)
+            issueCmd(fr'{path_to_output}')
             issueCmd('')  # do not save a dump file
         if Multiple:  # For several angles of attack
             for alfa in alfas:
@@ -673,7 +685,10 @@ def output_reader(filename, dir='', separator='\t', output=None,  # noqa C901
     elif output == 'Dump':
         rows_to_skip = 0
     elif output == 'Cp':
-        rows_to_skip = 2
+        if pf.system() == 'Windows':
+            rows_to_skip = 2
+        else:
+            rows_to_skip = 0
     elif output == 'Coordinates':
         rows_to_skip = 1
     # n is the amount of lines to skip
@@ -958,7 +973,7 @@ def file_name(airfoil, alfas='none', output='Cp'):  #noqa R701
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-def find_coefficients(airfoil, alpha, dir='', Reynolds=0,  # noqa R701
+def find_coefficients(airfoil, alpha, indir='', outdir='', Reynolds=0,  # noqa R701
                       iteration=10,
                       echo=False, NACA=True, delete=False,
                       PANE=False, GDES=False):
@@ -968,14 +983,14 @@ def find_coefficients(airfoil, alpha, dir='', Reynolds=0,  # noqa R701
     """
     filename = file_name(airfoil, alpha, output='Polar')
     # If file already exists, there is no need to recalculate it.
-    if not os.path.isfile(os.path.join(dir, filename)):
-        call(airfoil, dir=dir, alfas=alpha, Reynolds=Reynolds,
-             output='Polar', iteration=iteration, echo=echo,
+    if not os.path.isfile(os.path.join(outdir, filename)):
+        call(airfoil, indir=indir, outdir=outdir, alfas=alpha,
+             Reynolds=Reynolds, output='Polar', iteration=iteration, echo=echo,
              NACA=NACA, PANE=PANE, GDES=GDES)
 
     coefficients = {}
     # Data from file
-    Data = output_reader(filename, dir=dir, output='Polar', delete=delete)
+    Data = output_reader(filename, dir=outdir, output='Polar', delete=delete)
     for key in Data:
         try:
             if type(alpha) == list:
@@ -989,11 +1004,11 @@ def find_coefficients(airfoil, alpha, dir='', Reynolds=0,  # noqa R701
         except:  #noqa E722
             coefficients[key] = None
     if delete:
-        os.remove(os.path.join(dir, filename))
+        os.remove(os.path.join(outdir, filename))
     return coefficients
 
 
-def find_pressure_coefficients(airfoil, alpha, dir='', Reynolds=0,
+def find_pressure_coefficients(airfoil, alpha, indir='', outdir='', Reynolds=0,
                                iteration=10, echo=False, NACA=True,
                                use_previous=False, chord=1., PANE=False,
                                GDES=False, delete=False):
@@ -1001,13 +1016,13 @@ def find_pressure_coefficients(airfoil, alpha, dir='', Reynolds=0,
     filename = file_name(airfoil, alpha, output='Cp')
 
     # If file already exists, there is no need to recalculate it.
-    if not os.path.isfile(os.path.join(dir, filename)):
-            call(airfoil, dir=dir, alfas=alpha, Reynolds=Reynolds,
-                 output='Cp', iteration=iteration, echo=echo,
-                 NACA=NACA, PANE=PANE, GDES=GDES)
+    if not os.path.isfile(os.path.join(outdir, filename)):
+            call(airfoil, indir=indir, outdir=outdir, alfas=alpha,
+                 Reynolds=Reynolds, output='Cp', iteration=iteration,
+                 echo=echo, NACA=NACA, PANE=PANE, GDES=GDES)
     coefficients = {}
     # Data from file
-    Data = output_reader(filename, dir=dir, output='Cp', delete=delete)
+    Data = output_reader(filename, dir=outdir, output='Cp', delete=delete)
 
     for key in Data:
         coefficients[key] = Data[key]
@@ -1018,7 +1033,7 @@ def find_pressure_coefficients(airfoil, alpha, dir='', Reynolds=0,
     return coefficients
 
 
-def find_alpha_L_0(airfoil, dir='', Reynolds=0, iteration=10,
+def find_alpha_L_0(airfoil, indir='', outdir='', Reynolds=0, iteration=10,
                    NACA=True, echo=False):
     """Find zero lift angle of attack.
 
@@ -1027,13 +1042,15 @@ def find_alpha_L_0(airfoil, dir='', Reynolds=0, iteration=10,
     """
     filename = file_name(airfoil, output='Alfa_L_0')
     # If file already exists, there no need to recalculate it.
-    if not os.path.isfile(os.path.join(dir, filename)):
-        call(airfoil, dir=dir, output='Alfa_L_0', NACA=NACA, echo=echo)
-    alpha = output_reader(filename, dir=dir, output='Alfa_L_0')['alpha'][0]
+    if not os.path.isfile(os.path.join(outdir, filename)):
+        call(airfoil, indir=indir, outdir=outdir, output='Alfa_L_0', NACA=NACA,
+             echo=echo)
+    alpha = output_reader(filename, dir=outdir, output='Alfa_L_0')['alpha'][0]
     return alpha
 
 
-def M_crit(airfoil, pho, speed_sound, lift, c, dir='', echo=False):
+def M_crit(airfoil, pho, speed_sound, lift, c, indir='', outdir='',
+           echo=False):
     """Calculate the Critical Mach.
 
     This function was not validated.
@@ -1049,9 +1066,10 @@ def M_crit(airfoil, pho, speed_sound, lift, c, dir='', echo=False):
     Data_crit['alpha'] = 0
     for M in M_list:
         cl = (np.sqrt(1 - M**2)/(M**2))*2*lift/pho/(speed_sound)**2/c
-        call(airfoil, alfas, dir=dir, output='Polar', NACA=True, echo=echo)
+        call(airfoil, alfas, indir=indir, outdir=outdir, output='Polar',
+             NACA=True, echo=echo)
         filename = file_name(airfoil, alfas, output='Polar')
-        Data = output_reader(filename, ' ', 10, dir=dir)
+        Data = output_reader(filename, ' ', 10, dir=outdir)
         previous_iteration = Data_crit['CL']  # noqa W0612
         for i in range(0, len(Data['CL'])):
             if Data['CL'][i] >= cl and M > Data_crit['M']:
